@@ -2,7 +2,9 @@
     "core": [
         "base",
         "linux",
-        "linux-firmware"
+        "linux-firmware",
+        "grub",
+        "efibootmgr"
     ],
     "minimal": [
         "base-devel",

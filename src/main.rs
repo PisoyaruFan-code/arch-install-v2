@@ -3,6 +3,7 @@ use inquire::Select;
 mod disk_manager;
 mod args;
 mod packages;
+mod system_configs;
 
 fn main() {
     let disks = disk_manager::get_system_disks();
@@ -25,6 +26,10 @@ fn main() {
 
             if let Err(e) = packages::select_and_install_packages() {
                 eprintln!("❌ Kurulum başarısız: {}", e);
+            }
+
+            if let Err(e) = system_configs::post_install() {
+                eprintln!("❌ Kurulum sonrası işlemler başarısız: {}", e);
             }
         }
         Err(_) => println!("Seçim iptal edildi."),
