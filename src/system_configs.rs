@@ -358,12 +358,16 @@ pub fn generate_fstab() -> std::io::Result<()> {
 
 // ── Sistem yapılandırması uygulama ────────────────────────────────────────────
 
-pub fn apply_system_config(cfg: &SystemConfig, optional_packages: &[String]) -> std::io::Result<()> {
+pub fn apply_system_config(
+    cfg: &SystemConfig,
+    _optional_packages: &[String],
+    boot_modules: &[String],
+) -> std::io::Result<()> {
     set_timezone(&cfg.timezone)?;
     set_locale(&cfg.locales)?;
     set_hostname(&cfg.hostname)?;
     set_root_password(&cfg.root_password)?;
-    configure_mkinitcpio(optional_packages)?;
+    configure_mkinitcpio(boot_modules)?;
     install_grub()?;
     Ok(())
 }
@@ -562,7 +566,7 @@ fn configure_sudoers_wheel() -> std::io::Result<()> {
     Ok(())
 }
 
-fn configure_mkinitcpio(optional_packages: &[String]) -> std::io::Result<()> {
+fn configure_mkinitcpio(boot_modules: &[String]) -> std::io::Result<()> {
     println!("🔧 mkinitcpio.conf yapılandırılıyor...");
 
     let mkinitcpio_path = "/mnt/etc/mkinitcpio.conf";
@@ -574,42 +578,111 @@ fn configure_mkinitcpio(optional_packages: &[String]) -> std::io::Result<()> {
 
     let content = std::fs::read_to_string(mkinitcpio_path)?;
 
-    let mut modules_to_add = Vec::new();
-    if optional_packages.contains(&"amd-ucode".to_string()) {
-        modules_to_add.push("amd-ucode");
+    let mut modules_to_ensure = Vec::new();
+    if boot_modules.contains(&"amdgpu".to_string()) {
+        modules_to_ensure.push("amdgpu");
     }
-    if optional_packages.contains(&"intel-ucode".to_string()) {
-        modules_to_add.push("intel-ucode");
+    if boot_modules.contains(&"nvme".to_string()) {
+        modules_to_ensure.push("nvme");
     }
 
-    if modules_to_add.is_empty() {
-        println!("ℹ️  Ek MODULES gerekmiyor.");
-        return Ok(());
-    }
+    let recommended_hooks = vec![
+        "base",
+        "udev",
+        "autodetect",
+        "modconf",
+        "kms",
+        "keyboard",
+        "keymap",
+        "consolefont",
+        "block",
+        "filesystems",
+        "fsck",
+    ];
+
+    let mut did_change = false;
 
     let updated = content
         .lines()
         .map(|line| {
-            if line.trim().starts_with("MODULES=") {
-                let existing = line.trim_start_matches("MODULES=").trim();
+            let trimmed = line.trim();
+
+            if trimmed.starts_with("MODULES=") {
+                let existing = trimmed.trim_start_matches("MODULES=").trim();
                 let (inner, format_type) = if existing.starts_with('(') && existing.ends_with(')') {
-                    (&existing[1..existing.len()-1], "parens")
+                    (&existing[1..existing.len() - 1], "parens")
                 } else if existing.starts_with('"') && existing.ends_with('"') {
-                    (&existing[1..existing.len()-1], "quotes")
+                    (&existing[1..existing.len() - 1], "quotes")
                 } else {
                     (existing, "plain")
                 };
-                let mut new_modules = inner.split_whitespace().filter(|s| !s.is_empty()).collect::<Vec<_>>();
-                for module in &modules_to_add {
+
+                let mut new_modules = inner
+                    .split_whitespace()
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>();
+
+                for module in &modules_to_ensure {
                     if !new_modules.contains(module) {
                         new_modules.push(module);
+                        did_change = true;
                     }
                 }
-                match format_type {
+
+                let new_line = match format_type {
                     "parens" => format!("MODULES=({})", new_modules.join(" ")),
                     "quotes" => format!("MODULES=\"{}\"", new_modules.join(" ")),
                     _ => format!("MODULES={}", new_modules.join(" ")),
+                };
+
+                if new_line != line {
+                    did_change = true;
                 }
+                new_line
+            } else if trimmed.starts_with("HOOKS=") {
+                let existing = trimmed.trim_start_matches("HOOKS=").trim();
+                let (inner, format_type) = if existing.starts_with('(') && existing.ends_with(')') {
+                    (&existing[1..existing.len() - 1], "parens")
+                } else if existing.starts_with('"') && existing.ends_with('"') {
+                    (&existing[1..existing.len() - 1], "quotes")
+                } else {
+                    (existing, "plain")
+                };
+
+                let mut current_hooks = inner
+                    .split_whitespace()
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>();
+
+                for hook in &recommended_hooks {
+                    if !current_hooks.contains(hook) {
+                        current_hooks.push(hook);
+                        did_change = true;
+                    }
+                }
+
+                let mut ordered_hooks = Vec::new();
+                for hook in &recommended_hooks {
+                    if current_hooks.contains(hook) {
+                        ordered_hooks.push(*hook);
+                    }
+                }
+                for hook in &current_hooks {
+                    if !recommended_hooks.contains(hook) {
+                        ordered_hooks.push(*hook);
+                    }
+                }
+
+                let new_line = match format_type {
+                    "parens" => format!("HOOKS=({})", ordered_hooks.join(" ")),
+                    "quotes" => format!("HOOKS=\"{}\"", ordered_hooks.join(" ")),
+                    _ => format!("HOOKS={}", ordered_hooks.join(" ")),
+                };
+
+                if new_line != line {
+                    did_change = true;
+                }
+                new_line
             } else {
                 line.to_string()
             }
@@ -617,9 +690,13 @@ fn configure_mkinitcpio(optional_packages: &[String]) -> std::io::Result<()> {
         .collect::<Vec<_>>()
         .join("\n");
 
+    if !did_change {
+        println!("ℹ️  mkinitcpio.conf zaten önerilen ayarlara sahip.");
+        return Ok(());
+    }
+
     std::fs::write(mkinitcpio_path, format!("{}\n", updated))?;
 
-    // mkinitcpio'yu yeniden oluştur
     arch_chroot(&["mkinitcpio", "-P"])?;
 
     println!("✅ mkinitcpio.conf güncellendi ve initramfs yeniden oluşturuldu.");
@@ -705,7 +782,8 @@ pub fn post_install(optional_packages: &[String]) -> std::io::Result<()> {
     generate_fstab()?;
 
     let sys_cfg = gather_system_config();
-    apply_system_config(&sys_cfg, optional_packages)?;
+    let boot_modules = select_early_boot_modules()?;
+    apply_system_config(&sys_cfg, optional_packages, &boot_modules)?;
 
     let user_cfg = gather_user_config();
     create_user(&user_cfg)?;
@@ -716,4 +794,25 @@ pub fn post_install(optional_packages: &[String]) -> std::io::Result<()> {
     println!("   → reboot");
 
     Ok(())
+}
+
+fn select_early_boot_modules() -> std::io::Result<Vec<String>> {
+    println!("\n🔧 Erken yükleme için ek modüller seçin:");
+
+    let options = vec!["amdgpu".to_string(), "nvme".to_string()];
+    let selected = MultiSelect::new(
+        "Eklemek istediğiniz boot modüllerini seçin (Boşluk ile işaretle, Enter ile onayla):",
+        options,
+    )
+    .with_help_message("amdgpu: AMD GPU için, nvme: NVMe diskler için")
+    .prompt()
+    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Boot modül seçimi iptal edildi: {}", e)))?;
+
+    if selected.is_empty() {
+        println!("ℹ️  Ek boot modülü seçilmedi.");
+    } else {
+        println!("✅ Seçilen boot modülleri: {}", selected.join(", "));
+    }
+
+    Ok(selected)
 }
