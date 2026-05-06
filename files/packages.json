@@ -1,0 +1,17 @@
+{
+    "core": [
+        "base",
+        "linux",
+        "linux-firmware"
+    ],
+    "minimal": [
+        "base-devel",
+        "networkmanager",
+        "nano",
+        "sudo",
+        "pacman",
+        "git"
+    ],
+    "desktop": [
+    ]
+}
