@@ -591,14 +591,25 @@ fn configure_mkinitcpio(optional_packages: &[String]) -> std::io::Result<()> {
         .lines()
         .map(|line| {
             if line.trim().starts_with("MODULES=") {
-                let existing = line.trim_start_matches("MODULES=").trim_matches('"').trim();
-                let mut new_modules = existing.split_whitespace().collect::<Vec<_>>();
+                let existing = line.trim_start_matches("MODULES=").trim();
+                let (inner, format_type) = if existing.starts_with('(') && existing.ends_with(')') {
+                    (&existing[1..existing.len()-1], "parens")
+                } else if existing.starts_with('"') && existing.ends_with('"') {
+                    (&existing[1..existing.len()-1], "quotes")
+                } else {
+                    (existing, "plain")
+                };
+                let mut new_modules = inner.split_whitespace().filter(|s| !s.is_empty()).collect::<Vec<_>>();
                 for module in &modules_to_add {
                     if !new_modules.contains(module) {
                         new_modules.push(module);
                     }
                 }
-                format!("MODULES=\"{}\"", new_modules.join(" "))
+                match format_type {
+                    "parens" => format!("MODULES=({})", new_modules.join(" ")),
+                    "quotes" => format!("MODULES=\"{}\"", new_modules.join(" ")),
+                    _ => format!("MODULES={}", new_modules.join(" ")),
+                }
             } else {
                 line.to_string()
             }
@@ -622,6 +633,7 @@ fn install_grub() -> std::io::Result<()> {
 
     if is_efi {
         println!("  → UEFI sistemi tespit edildi.");
+        println!("  → grub-install çalıştırılıyor...");
         arch_chroot(&[
             "grub-install",
             "--target=x86_64-efi",
@@ -633,9 +645,11 @@ fn install_grub() -> std::io::Result<()> {
         println!("  → BIOS/Legacy sistemi tespit edildi.");
         let device = find_root_disk()?;
         println!("  → Boot diski: {}", device);
+        println!("  → grub-install çalıştırılıyor...");
         arch_chroot(&["grub-install", "--target=i386-pc", "--recheck", &device])?;
     }
 
+    println!("  → grub-mkconfig çalıştırılıyor...");
     arch_chroot(&["grub-mkconfig", "-o", "/boot/grub/grub.cfg"])?;
 
     println!("✅ GRUB kurulumu tamamlandı.");
