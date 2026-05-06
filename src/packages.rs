@@ -4,7 +4,7 @@ use inquire::Select;
 
 // GitHub raw URL — kendi repo adresinle değiştir
 const PACKAGES_URL: &str =
-    "https://raw.githubusercontent.com/PisoyaruFan-code/arch-install-v2/main/files/packages.json";
+    "https://raw.githubusercontent.com/PisoyaruFan-code/arch-install-v2/refs/heads/master/files/packages.json";
 
 #[derive(Deserialize, Debug)]
 struct PackageList {
