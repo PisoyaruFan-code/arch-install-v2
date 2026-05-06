@@ -22,6 +22,10 @@ fn main() {
             println!("Seçilen hedef: {}", disk_path);
             
             disk_manager::format_the_disk(disk_path);
+
+            if let Err(e) = packages::select_and_install_packages() {
+                eprintln!("❌ Kurulum başarısız: {}", e);
+            }
         }
         Err(_) => println!("Seçim iptal edildi."),
     }
