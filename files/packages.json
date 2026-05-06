@@ -35,7 +35,6 @@
         "ttf-jetbrains-mono-nerd"
     ],
     "optional": [
-        "nvme-cli",
         "amd-ucode",
         "intel-ucode",
         "mesa",
