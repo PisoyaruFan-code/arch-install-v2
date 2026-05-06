@@ -1,6 +1,6 @@
 use std::process::Command;
 use serde::Deserialize;
-use inquire::Select;
+use inquire::{MultiSelect, Select};
 
 // GitHub raw URL — kendi repo adresinle değiştir
 const PACKAGES_URL: &str =
@@ -11,6 +11,7 @@ struct PackageList {
     core: Vec<String>,
     minimal: Vec<String>,
     desktop: Vec<String>,
+    optional: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,9 +106,22 @@ fn resolve_packages(list: &PackageList, level: &InstallLevel) -> Vec<String> {
     packages
 }
 
+fn select_optional_packages(package_list: &PackageList) -> Result<Vec<String>, String> {
+    println!("\n🔧 Opsiyonel paketler (donanım sürücüleri, vb.):");
+    let selected = MultiSelect::new(
+        "İstediğiniz opsiyonel paketleri seçin (Boşluk ile işaretle, Enter ile onayla):",
+        package_list.optional.clone(),
+    )
+    .with_help_message("Hiçbiri zorunlu değil, Enter ile geçebilirsiniz")
+    .prompt()
+    .map_err(|e| format!("Opsiyonel paket seçimi iptal edildi: {}", e))?;
+
+    Ok(selected)
+}
+
 /// Kullanıcıya kurulum seviyesini seçtirir,
 /// paketi indirir ve `pacstrap` ile kurar.
-pub fn select_and_install_packages() -> Result<(), String> {
+pub fn select_and_install_packages() -> Result<Vec<String>, String> {
     // 1. Seviye seçimi
     let level = Select::new(
         "Kurulum seviyesini seçin:",
@@ -121,7 +135,12 @@ pub fn select_and_install_packages() -> Result<(), String> {
     let package_list = fetch_package_list()?;
 
     // 3. Kurulacak paketleri belirle
-    let packages = resolve_packages(&package_list, &level);
+    let mut packages = resolve_packages(&package_list, &level);
+
+    // 4. Optional paketleri seç
+    let optional_packages = select_optional_packages(&package_list)?;
+
+    packages.extend(optional_packages.clone());
 
     println!("\n📋 Kurulacak {} paket:", packages.len());
     for (i, pkg) in packages.iter().enumerate() {
@@ -130,8 +149,10 @@ pub fn select_and_install_packages() -> Result<(), String> {
     }
     println!("\n");
 
-    // 4. pacstrap ile kur (/mnt önceden mount edilmiş olmalı)
-    install_packages(&packages)
+    // 5. pacstrap ile kur (/mnt önceden mount edilmiş olmalı)
+    install_packages(&packages)?;
+
+    Ok(optional_packages)
 }
 
 fn install_packages(packages: &[String]) -> Result<(), String> {

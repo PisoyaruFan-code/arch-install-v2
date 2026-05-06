@@ -24,11 +24,15 @@ fn main() {
             
             disk_manager::format_the_disk(disk_path);
 
-            if let Err(e) = packages::select_and_install_packages() {
-                eprintln!("❌ Kurulum başarısız: {}", e);
-            }
+            let optional_packages = match packages::select_and_install_packages() {
+                Ok(op) => op,
+                Err(e) => {
+                    eprintln!("❌ Kurulum başarısız: {}", e);
+                    return;
+                }
+            };
 
-            if let Err(e) = system_configs::post_install() {
+            if let Err(e) = system_configs::post_install(&optional_packages) {
                 eprintln!("❌ Kurulum sonrası işlemler başarısız: {}", e);
             }
         }

@@ -358,11 +358,12 @@ pub fn generate_fstab() -> std::io::Result<()> {
 
 // ── Sistem yapılandırması uygulama ────────────────────────────────────────────
 
-pub fn apply_system_config(cfg: &SystemConfig) -> std::io::Result<()> {
+pub fn apply_system_config(cfg: &SystemConfig, optional_packages: &[String]) -> std::io::Result<()> {
     set_timezone(&cfg.timezone)?;
     set_locale(&cfg.locales)?;
     set_hostname(&cfg.hostname)?;
     set_root_password(&cfg.root_password)?;
+    configure_mkinitcpio(optional_packages)?;
     install_grub()?;
     Ok(())
 }
@@ -561,7 +562,58 @@ fn configure_sudoers_wheel() -> std::io::Result<()> {
     Ok(())
 }
 
-// ── GRUB ──────────────────────────────────────────────────────────────────────
+fn configure_mkinitcpio(optional_packages: &[String]) -> std::io::Result<()> {
+    println!("🔧 mkinitcpio.conf yapılandırılıyor...");
+
+    let mkinitcpio_path = "/mnt/etc/mkinitcpio.conf";
+
+    if !Path::new(mkinitcpio_path).exists() {
+        println!("ℹ️  mkinitcpio.conf bulunamadı, atlandı.");
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(mkinitcpio_path)?;
+
+    let mut modules_to_add = Vec::new();
+    if optional_packages.contains(&"amd-ucode".to_string()) {
+        modules_to_add.push("amd-ucode");
+    }
+    if optional_packages.contains(&"intel-ucode".to_string()) {
+        modules_to_add.push("intel-ucode");
+    }
+
+    if modules_to_add.is_empty() {
+        println!("ℹ️  Ek MODULES gerekmiyor.");
+        return Ok(());
+    }
+
+    let updated = content
+        .lines()
+        .map(|line| {
+            if line.trim().starts_with("MODULES=") {
+                let existing = line.trim_start_matches("MODULES=").trim_matches('"').trim();
+                let mut new_modules = existing.split_whitespace().collect::<Vec<_>>();
+                for module in &modules_to_add {
+                    if !new_modules.contains(module) {
+                        new_modules.push(module);
+                    }
+                }
+                format!("MODULES=\"{}\"", new_modules.join(" "))
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    std::fs::write(mkinitcpio_path, format!("{}\n", updated))?;
+
+    // mkinitcpio'yu yeniden oluştur
+    arch_chroot(&["mkinitcpio", "-P"])?;
+
+    println!("✅ mkinitcpio.conf güncellendi ve initramfs yeniden oluşturuldu.");
+    Ok(())
+}
 
 fn install_grub() -> std::io::Result<()> {
     println!("🥾 GRUB kuruluyor...");
@@ -635,11 +687,11 @@ fn arch_chroot(args: &[&str]) -> std::io::Result<()> {
 
 // ── Ana akış ─────────────────────────────────────────────────────────────────
 
-pub fn post_install() -> std::io::Result<()> {
+pub fn post_install(optional_packages: &[String]) -> std::io::Result<()> {
     generate_fstab()?;
 
     let sys_cfg = gather_system_config();
-    apply_system_config(&sys_cfg)?;
+    apply_system_config(&sys_cfg, optional_packages)?;
 
     let user_cfg = gather_user_config();
     create_user(&user_cfg)?;
