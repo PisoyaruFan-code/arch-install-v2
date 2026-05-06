@@ -15,5 +15,23 @@
         "git"
     ],
     "desktop": [
+        "pipewire",
+        "pipewire-pulse",
+        "pipewire-alsa",
+        "wireplumber",
+        "kate",
+        "dolphin",
+        "flatpak",
+        "firefox",
+        "discord",
+        "hyprland",
+        "xdg-desktop-portal-hyprland",
+        "waybar",
+        "wofi",
+        "wl-clipboard",
+        "kitty",
+        "ttf-font-awesome",
+        "noto-fonts-emoji",
+        "ttf-jetbrains-mono-nerd"
     ]
 }
